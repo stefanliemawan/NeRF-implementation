@@ -5,11 +5,13 @@ import numpy as np
 
 # Initialize global variables.
 AUTO = tf.data.AUTOTUNE
-BATCH_SIZE = 1
-NUM_SAMPLES = 8
+BATCH_SIZE = 2
+NUM_SAMPLES = 32
 POS_ENCODE_DIMS = 16
-EPOCHS = 85
+EPOCHS = 20
 RANDOM_SEED = 42
+
+# 200 epoch baru keliat
 
 
 # Download the data if it does not already exist.
@@ -23,6 +25,10 @@ images = data["images"]
 im_shape = images.shape
 (num_images, H, W, _) = images.shape
 (poses, focal) = (data["poses"], data["focal"])
+
+
+# Create the training split.
+split_index = int(num_images * 0.8)
 
 # Plot a random image from the dataset for visualization.
 # plt.imshow(images[np.random.randint(low=0, high=num_images)])
