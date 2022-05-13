@@ -1,27 +1,21 @@
 from tensorflow import keras
-import matplotlib.pyplot as plt
 import tensorflow as tf
+import matplotlib.pyplot as plt
 import numpy as np
 import os
 import glob
 import imageio
 from tqdm import tqdm
 
-from load_prepare_data import train_val_split
+from prepare_data import create_ds
 from model import get_nerf_model, render_rgb_depth
 import variables as var
 
-
-train_ds, val_ds = train_val_split()
+train_ds = create_ds(var.train_images, var.train_poses)
+val_ds = create_ds(var.val_images, var.val_poses)
 
 print(train_ds.element_spec)
 print(val_ds.element_spec)
-
-num_pos = var.H * var.W * var.NUM_SAMPLES
-
-print(var.focal)
-print(var.poses.shape)
-
 
 # class NeRF(keras.Model):
 #     def __init__(self, nerf_model):
