@@ -4,29 +4,8 @@ import numpy as np
 import os
 import tensorflow as tf
 
-# Initialize global variables.
-AUTO = tf.data.AUTOTUNE
-BATCH_SIZE = 5
-NUM_SAMPLES = 32
-POS_ENCODE_DIMS = 16
-EPOCHS = 20
-RANDOM_SEED = 42
+import variables as var
 
-# Download the data if it does not already exist.
-file_name = "tiny_nerf_data.npz"
-url = "https://people.eecs.berkeley.edu/~bmild/nerf/tiny_nerf_data.npz"
-if not os.path.exists(file_name):
-    data = keras.utils.get_file(fname=file_name, origin=url)
-
-data = np.load(data)
-images = data["images"]
-im_shape = images.shape
-(num_images, H, W, _) = images.shape
-(poses, focal) = (data["poses"], data["focal"])
-
-# Plot a random image from the dataset for visualization.
-# plt.imshow(images[np.random.randint(low=0, high=num_images)])
-# plt.show()
 
 def encode_position(x):
     """Encodes the position into its corresponding Fourier feature.
@@ -38,7 +17,7 @@ def encode_position(x):
         Fourier features tensors of the position.
     """
     positions = [x]
-    for i in range(POS_ENCODE_DIMS):
+    for i in range(var.POS_ENCODE_DIMS):
         for fn in [tf.sin, tf.cos]:
             positions.append(fn(2.0 ** i * x))
     return tf.concat(positions, axis=-1)
@@ -129,13 +108,13 @@ def map_fn(pose):
         Tuple of flattened rays and sample points corresponding to the
         camera pose.
     """
-    (ray_origins, ray_directions) = get_rays(height=H, width=W, focal=focal, pose=pose)
+    (ray_origins, ray_directions) = get_rays(height=var.H, width=var.W, focal=var.focal, pose=pose)
     (rays_flat, t_vals) = render_flat_rays(
         ray_origins=ray_origins,
         ray_directions=ray_directions,
         near=2.0,
         far=6.0,
-        num_samples=NUM_SAMPLES,
+        num_samples=var.NUM_SAMPLES,
         rand=True,
     )
     return (rays_flat, t_vals)
@@ -143,36 +122,42 @@ def map_fn(pose):
 
 def train_val_split():
     # Create the training split.
-    split_index = int(num_images * 0.8)
+    split_index = int(var.num_images * 0.8)
 
     # Split the images into training and validation.
-    train_images = images[:split_index]
-    val_images = images[split_index:]
+    train_images = var.images[:split_index]
+    val_images = var.images[split_index:]
 
     # Split the poses into training and validation.
-    train_poses = poses[:split_index]
-    val_poses = poses[split_index:]
+    train_poses = var.poses[:split_index]
+    val_poses = var.poses[split_index:]
+
+    (rays_flat, t_vals) = map_fn(train_poses[0])
+    print(rays_flat)
+    print(t_vals)
 
     # Make the training pipeline.
     train_img_ds = tf.data.Dataset.from_tensor_slices(train_images)
     train_pose_ds = tf.data.Dataset.from_tensor_slices(train_poses)
-    train_ray_ds = train_pose_ds.map(map_fn, num_parallel_calls=AUTO)
-    training_ds = tf.data.Dataset.zip((train_img_ds, train_ray_ds))
-    train_ds = (
-        training_ds.shuffle(BATCH_SIZE)
-        .batch(BATCH_SIZE, drop_remainder=True, num_parallel_calls=AUTO)
-        .prefetch(AUTO)
-    )
+    train_ray_ds = train_pose_ds.map(map_fn, num_parallel_calls=var.AUTO)
+    # training_ds = tf.data.Dataset.zip((train_img_ds, train_ray_ds))
+    # train_ds = (
+    #     training_ds.shuffle(var.BATCH_SIZE)
+    #     .batch(var.BATCH_SIZE, drop_remainder=True, num_parallel_calls=var.AUTO)
+    #     .prefetch(var.AUTO)
+    # )
 
     # Make the validation pipeline.
     val_img_ds = tf.data.Dataset.from_tensor_slices(val_images)
     val_pose_ds = tf.data.Dataset.from_tensor_slices(val_poses)
-    val_ray_ds = val_pose_ds.map(map_fn, num_parallel_calls=AUTO)
-    validation_ds = tf.data.Dataset.zip((val_img_ds, val_ray_ds))
-    val_ds = (
-        validation_ds.shuffle(BATCH_SIZE)
-        .batch(BATCH_SIZE, drop_remainder=True, num_parallel_calls=AUTO)
-        .prefetch(AUTO)
-    )
+    val_ray_ds = val_pose_ds.map(map_fn, num_parallel_calls=var.AUTO)
+    # validation_ds = tf.data.Dataset.zip((val_img_ds, val_ray_ds))
+    # val_ds = (
+    #     validation_ds.shuffle(var.BATCH_SIZE)
+    #     .batch(var.BATCH_SIZE, drop_remainder=True, num_parallel_calls=var.AUTO)
+    #     .prefetch(var.AUTO)
+    # )
 
-    return train_ds, val_ds
+    # return ray_ds only?
+
+    return train_ray_ds, val_ray_ds
