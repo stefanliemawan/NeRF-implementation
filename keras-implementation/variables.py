@@ -5,10 +5,10 @@ import numpy as np
 
 # Initialize global variables.
 AUTO = tf.data.AUTOTUNE
-BATCH_SIZE = 5
-NUM_SAMPLES = 32
+BATCH_SIZE = 1
+NUM_SAMPLES = 8
 POS_ENCODE_DIMS = 16
-EPOCHS = 20
+EPOCHS = 85
 RANDOM_SEED = 42
 
 

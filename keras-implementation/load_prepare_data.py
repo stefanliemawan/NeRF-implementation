@@ -133,31 +133,29 @@ def train_val_split():
     val_poses = var.poses[split_index:]
 
     (rays_flat, t_vals) = map_fn(train_poses[0])
-    print(rays_flat)
-    print(t_vals)
 
     # Make the training pipeline.
     train_img_ds = tf.data.Dataset.from_tensor_slices(train_images)
     train_pose_ds = tf.data.Dataset.from_tensor_slices(train_poses)
     train_ray_ds = train_pose_ds.map(map_fn, num_parallel_calls=var.AUTO)
-    # training_ds = tf.data.Dataset.zip((train_img_ds, train_ray_ds))
-    # train_ds = (
-    #     training_ds.shuffle(var.BATCH_SIZE)
-    #     .batch(var.BATCH_SIZE, drop_remainder=True, num_parallel_calls=var.AUTO)
-    #     .prefetch(var.AUTO)
-    # )
+    training_ds = tf.data.Dataset.zip((train_img_ds, train_ray_ds))
+    train_ds = (
+        training_ds.shuffle(var.BATCH_SIZE)
+        .batch(var.BATCH_SIZE, drop_remainder=True, num_parallel_calls=var.AUTO)
+        .prefetch(var.AUTO)
+    )
 
     # Make the validation pipeline.
     val_img_ds = tf.data.Dataset.from_tensor_slices(val_images)
     val_pose_ds = tf.data.Dataset.from_tensor_slices(val_poses)
     val_ray_ds = val_pose_ds.map(map_fn, num_parallel_calls=var.AUTO)
-    # validation_ds = tf.data.Dataset.zip((val_img_ds, val_ray_ds))
-    # val_ds = (
-    #     validation_ds.shuffle(var.BATCH_SIZE)
-    #     .batch(var.BATCH_SIZE, drop_remainder=True, num_parallel_calls=var.AUTO)
-    #     .prefetch(var.AUTO)
-    # )
+    validation_ds = tf.data.Dataset.zip((val_img_ds, val_ray_ds))
+    val_ds = (
+        validation_ds.shuffle(var.BATCH_SIZE)
+        .batch(var.BATCH_SIZE, drop_remainder=True, num_parallel_calls=var.AUTO)
+        .prefetch(var.AUTO)
+    )
 
     # return ray_ds only?
 
-    return train_ray_ds, val_ray_ds
+    return train_ds, val_ds
