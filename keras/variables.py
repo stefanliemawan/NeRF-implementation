@@ -6,11 +6,15 @@ import numpy as np
 # Initialize global variables.
 AUTO = tf.data.AUTOTUNE
 BATCH_SIZE = 1
-NUM_SAMPLES = 16
+NUM_SAMPLES = 32
 POS_ENCODE_DIMS = 16
 EPOCHS = 50
 RANDOM_SEED = 42
 
+print("BATCH_SIZE:", BATCH_SIZE)
+print("NUM_SAMPLES:", NUM_SAMPLES)
+print("POS_ENCODE_DIMS:", POS_ENCODE_DIMS)
+print("EPOCHS:", EPOCHS)
 
 # Download the data if it does not already exist.
 file_name = "tiny_nerf_data.npz"
