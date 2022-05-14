@@ -11,8 +11,6 @@ POS_ENCODE_DIMS = 16
 EPOCHS = 20
 RANDOM_SEED = 42
 
-# 200 epoch baru keliat
-
 
 # Download the data if it does not already exist.
 file_name = "tiny_nerf_data.npz"
