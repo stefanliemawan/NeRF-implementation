@@ -126,6 +126,9 @@ def train(train_ds, val_ds):
     nerf_model.build((num_pos, 2 * 3 * var.POS_ENCODE_DIMS + 3))
     nerf_model.summary()
 
+    if not os.path.exists("./result"):
+        os.makedirs("./result")
+
     with open("./result/model_summary.txt", "w") as f:
         with redirect_stdout(f):
             nerf_model.summary()
