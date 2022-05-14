@@ -1,7 +1,3 @@
-import matplotlib.pyplot as plt
-from tensorflow import keras
-import numpy as np
-import os
 import tensorflow as tf
 
 import variables as var
@@ -35,7 +31,7 @@ def get_rays(height, width, focal, pose):
     Returns:
         Tuple of origin point and direction vector for rays.
     """
-    # Build a meshgrid for the rays.
+    # Build a meshgrid for the rays, for the image pixels
     i, j = tf.meshgrid(
         tf.range(width, dtype=tf.float32),
         tf.range(height, dtype=tf.float32),
@@ -50,8 +46,8 @@ def get_rays(height, width, focal, pose):
 
     # Create the direction unit vectors.
     directions = tf.stack([transformed_i, -transformed_j, -tf.ones_like(i)], axis=-1)
-
-    # Get the camera matrix.
+    
+    # Get the camera matrix, why only take 3?
     camera_matrix = pose[:3, :3]
     height_width_focal = pose[:3, -1]
 
