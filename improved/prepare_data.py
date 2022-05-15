@@ -47,7 +47,7 @@ def get_rays(height, width, focal, pose):
     # Create the direction unit vectors.
     directions = tf.stack([transformed_i, -transformed_j, -tf.ones_like(i)], axis=-1)
     
-    # Get the camera matrix, why only take 3?
+    # Get the camera matrix
     camera_matrix = pose[:3, :3]
     height_width_focal = pose[:3, -1]
 
@@ -105,6 +105,11 @@ def map_fn(pose):
         camera pose.
     """
     (ray_origins, ray_directions) = get_rays(height=var.H, width=var.W, focal=var.focal, pose=pose)
+
+    print(pose)
+    print(ray_origins)
+    print(ray_directions)
+    
     (rays_flat, t_vals) = render_flat_rays(
         ray_origins=ray_origins,
         ray_directions=ray_directions,
@@ -113,6 +118,10 @@ def map_fn(pose):
         num_samples=var.NUM_SAMPLES,
         rand=True,
     )
+
+    print(rays_flat)
+    print(t_vals)
+    
     return (rays_flat, t_vals)
 
 
@@ -125,12 +134,6 @@ def train_val_split():
     # Split the poses into training and validation.
     train_poses = var.poses[:var.split_index]
     val_poses = var.poses[var.split_index:]
-
-    print(train_images.shape)
-    print(val_images.shape)
-
-    print(train_poses.shape)
-    print(val_poses.shape)
 
     # Make the training pipeline.
     train_img_ds = tf.data.Dataset.from_tensor_slices(train_images)

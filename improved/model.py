@@ -15,15 +15,45 @@ def get_nerf_model(num_layers, num_pos):
     Returns:
         The [`tf.keras`](https://www.tensorflow.org/api_docs/python/tf/keras) model.
     """
-    inputs = keras.Input(shape=(num_pos, 2 * 3 * var.POS_ENCODE_DIMS + 3))
-    x = inputs
+    ray_input = keras.Input(shape=(num_pos, 2 * 3 * var.POS_ENCODE_DIMS + 3))
+    dir_input = keras.Input(shape=(num_pos, 2 * 3 * var.POS_ENCODE_DIMS + 3))
+
+    x = ray_input
     for i in range(num_layers):
         x = layers.Dense(units=64, activation="relu")(x)
-    x = layers.concatenate([x, inputs], axis=-1)
-    x = layers.Dense(units=32,activation="relu")(x)
-    outputs = layers.Dense(units=4)(x)
-    return keras.Model(inputs=inputs, outputs=outputs)
+    x = layers.concatenate([x, ray_input], axis=-1)
+    
+    sigma = layers.Dense(units=1, activation="relu")(x)
 
+    feature = layers.Dense(units=64)(x)
+
+    feature = layers.concatenate([feature, dir_input], axis=-1)
+    x = layers.Dense(units=64//2, activation="relu")(feature)
+
+    rgb = layers.Dense(units=3, activation="sigmoid")(x)
+
+    return keras.Model(inputs=[ray_input, dir_input], outputs=[rgb, sigma])
+
+
+# def get_nerf_model(num_layers, num_pos):
+#     """Generates the NeRF neural network.
+
+#     Args:
+#         num_layers: The number of MLP layers.
+#         num_pos: The number of dimensions of positional encoding.
+
+#     Returns:
+#         The [`tf.keras`](https://www.tensorflow.org/api_docs/python/tf/keras) model.
+#     """
+#     inputs = keras.Input(shape=(num_pos, 2 * 3 * var.POS_ENCODE_DIMS + 3))
+#     x = inputs
+#     for i in range(num_layers):
+#         x = layers.Dense(units=64, activation="relu")(x)
+#         if i % 4 == 0 and i > 0:
+#             # Inject residual connection.
+#             x = layers.concatenate([x, inputs], axis=-1)
+#     outputs = layers.Dense(units=4)(x)
+#     return keras.Model(inputs=inputs, outputs=outputs)
 
 def render_rgb_depth(model, rays_flat, t_vals, rand=True, train=True):
     """Generates the RGB image and depth map from model prediction.

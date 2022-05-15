@@ -154,33 +154,33 @@ def train(train_ds, val_ds):
 
     create_gif("./result/images/*.png", "./result/training.gif")
 
-    # Inference
+    # # Inference
 
-    nerf_model = model.nerf_model
+    # nerf_model = model.nerf_model
 
-    test_recons_images, depth_maps = render_rgb_depth(
-        model=nerf_model,
-        rays_flat=test_rays_flat,
-        t_vals=test_t_vals,
-        rand=True,
-        train=False,
-    )
+    # test_recons_images, depth_maps = render_rgb_depth(
+    #     model=nerf_model,
+    #     rays_flat=test_rays_flat,
+    #     t_vals=test_t_vals,
+    #     rand=True,
+    #     train=False,
+    # )
 
-    # Create subplots.
-    fig, axes = plt.subplots(nrows=5, ncols=3, figsize=(10, 20))
+    # # Create subplots.
+    # fig, axes = plt.subplots(nrows=5, ncols=3, figsize=(10, 20))
 
-    for ax, ori_img, recons_img, depth_map in zip(
-        axes, test_imgs, test_recons_images, depth_maps
-    ):
-        ax[0].imshow(keras.preprocessing.image.array_to_img(ori_img))
-        ax[0].set_title("Original")
+    # for ax, ori_img, recons_img, depth_map in zip(
+    #     axes, test_imgs, test_recons_images, depth_maps
+    # ):
+    #     ax[0].imshow(keras.preprocessing.image.array_to_img(ori_img))
+    #     ax[0].set_title("Original")
 
-        ax[1].imshow(keras.preprocessing.image.array_to_img(recons_img))
-        ax[1].set_title("Reconstructed")
+    #     ax[1].imshow(keras.preprocessing.image.array_to_img(recons_img))
+    #     ax[1].set_title("Reconstructed")
 
-        ax[2].imshow(
-            keras.preprocessing.image.array_to_img(depth_map[..., None]), cmap="inferno"
-        )
-        ax[2].set_title("Depth Map")
+    #     ax[2].imshow(
+    #         keras.preprocessing.image.array_to_img(depth_map[..., None]), cmap="inferno"
+    #     )
+    #     ax[2].set_title("Depth Map")
 
-    render(nerf_model)
+    # render(nerf_model)

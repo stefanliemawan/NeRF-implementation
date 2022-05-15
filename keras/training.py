@@ -118,7 +118,7 @@ def train(train_ds, val_ds):
 
             fig.savefig(f"./result/images/{epoch:03d}.png")
             # plt.show()
-            # plt.close()
+            plt.close()
 
 
     num_pos = var.H * var.W * var.NUM_SAMPLES
