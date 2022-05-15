@@ -23,6 +23,7 @@ class NeRF(keras.Model):
         self.loss_fn = loss_fn
         self.loss_tracker = keras.metrics.Mean(name="loss")
         self.psnr_metric = keras.metrics.Mean(name="psnr")
+        self.ssim_metric = keras.metrics.Mean(name="ssim")
 
     def train_step(self, inputs):
         # Get the images and the rays.
@@ -47,11 +48,15 @@ class NeRF(keras.Model):
 
         # Get the PSNR of the reconstructed images and the source images.
         psnr = tf.image.psnr(images, rgb, max_val=1.0)
+        ssim = tf.image.ssim(images, rgb, max_val=1.0)
 
         # Compute our own metrics
         self.loss_tracker.update_state(loss)
         self.psnr_metric.update_state(psnr)
-        return {"loss": self.loss_tracker.result(), "psnr": self.psnr_metric.result()}
+        self.ssim_metric.update_state(ssim)
+
+        return {"loss": self.loss_tracker.result(), "psnr": self.psnr_metric.result(), "ssim": self.ssim_metric.result()}
+
 
     def test_step(self, inputs):
         # Get the images and the rays.
@@ -66,11 +71,15 @@ class NeRF(keras.Model):
 
         # Get the PSNR of the reconstructed images and the source images.
         psnr = tf.image.psnr(images, rgb, max_val=1.0)
+        ssim = tf.image.ssim(images, rgb, max_val=1.0)
 
         # Compute our own metrics
         self.loss_tracker.update_state(loss)
         self.psnr_metric.update_state(psnr)
-        return {"loss": self.loss_tracker.result(), "psnr": self.psnr_metric.result()}
+        self.ssim_metric.update_state(ssim)
+
+        return {"loss": self.loss_tracker.result(), "psnr": self.psnr_metric.result(), "ssim": self.ssim_metric.result()}
+
 
     @property
     def metrics(self):
