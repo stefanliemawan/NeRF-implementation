@@ -7,12 +7,16 @@ from tensorflow.keras import layers
 import imageio
 from tqdm import tqdm
 import glob
+from contextlib import redirect_stdout
 
 # Initialize global variables.
 AUTO = tf.data.AUTOTUNE
 BATCH_SIZE = 1
 NUM_SAMPLES = 10
-POS_ENCODE_DIMS = 16
+# POS_ENCODE_DIMS_RAYS = 10
+# POS_ENCODE_DIMS_DIRS = 4
+POS_ENCODE_DIMS_RAYS = 16
+POS_ENCODE_DIMS_DIRS = 16
 EPOCHS = 50
 RANDOM_SEED = 42
 NEAR = 2.0
@@ -22,7 +26,8 @@ DENSE_UNITS = 64
 
 print("BATCH_SIZE:", BATCH_SIZE)
 print("NUM_SAMPLES:", NUM_SAMPLES)
-print("POS_ENCODE_DIMS:", POS_ENCODE_DIMS)
+print("POS_ENCODE_DIMS_RAYS:", POS_ENCODE_DIMS_RAYS)
+print("POS_ENCODE_DIMS_DIRS:", POS_ENCODE_DIMS_DIRS)
 print("EPOCHS:", EPOCHS)
 
 # Download the data if it does not already exist.
@@ -71,17 +76,9 @@ def get_rays(pose):
     return (ray_origins, ray_directions, t_vals)
 
 
-def positional_encoding(x):
-    """Encodes the position into its corresponding Fourier feature.
-
-    Args:
-        x: The input coordinate.
-
-    Returns:
-        Fourier features tensors of the position.
-    """
+def positional_encoding(x, encode_dims):
     positions = [x]
-    for i in range(POS_ENCODE_DIMS):
+    for i in range(encode_dims):
         for fn in [tf.sin, tf.cos]:
             positions.append(fn(2.0 ** i * x))
     return tf.concat(positions, axis=-1)
@@ -118,8 +115,8 @@ def hierarchical_sampling(t_vals_mid, weights, num_samples_fine):
 	return samples
 
 def get_model(num_layers=8, dense_units=64):
-    ray_input = layers.Input(shape=(None, None, None, 2 * 3 * POS_ENCODE_DIMS + 3), batch_size=BATCH_SIZE)
-    dir_input = layers.Input(shape=(None, None, None, 2 * 3 * POS_ENCODE_DIMS + 3), batch_size=BATCH_SIZE)
+    ray_input = layers.Input(shape=(None, None, None, 2 * 3 * POS_ENCODE_DIMS_RAYS + 3), batch_size=BATCH_SIZE)
+    dir_input = layers.Input(shape=(None, None, None, 2 * 3 * POS_ENCODE_DIMS_DIRS + 3), batch_size=BATCH_SIZE)
 
     x = ray_input
     for i in range(num_layers):
@@ -186,6 +183,7 @@ class NerfTrainer(keras.Model):
         
         self.loss_tracker = keras.metrics.Mean(name="loss")
         self.psnr_metric = keras.metrics.Mean(name="psnr")
+        self.ssim_metric = keras.metrics.Mean(name="ssim")
 
     def train_step(self, inputs):
         # simplify this?
@@ -194,12 +192,12 @@ class NerfTrainer(keras.Model):
 
         # Equation: r(t) = o + td -> Building the "r" here.
         rays_coarse = rays_origins_coarse[..., None, :] + (rays_directions_coarse[..., None,:] * t_vals_coarse[..., None])
-        rays_coarse = self.positional_encoding(rays_coarse)
+        rays_coarse = self.positional_encoding(rays_coarse, POS_ENCODE_DIMS_RAYS)
 
         # same as flatten in keras?
         directions_coarse_shape = tf.shape(rays_coarse[..., :3])
         directions_coarse = tf.broadcast_to(rays_directions_coarse[..., None, :], shape=directions_coarse_shape)
-        directions_coarse = self.positional_encoding(directions_coarse)
+        directions_coarse = self.positional_encoding(directions_coarse, POS_ENCODE_DIMS_DIRS)
 
         with tf.GradientTape() as coarse_tape:
             (rgb_coarse, sigma_coarse) = self.coarse_model([rays_coarse, directions_coarse])
@@ -209,15 +207,15 @@ class NerfTrainer(keras.Model):
 
         t_vals_coarse_mid = (0.5 * (t_vals_coarse[..., 1:] + t_vals_coarse[..., :-1]))
 
-        t_vals_fine = self.hierarchical_sampling(t_vals_coarse_mid, weights_coarse, self.model.num_samples_fine)
-        t_vals_fine = tf.sort(tf.concat([t_vals_coarse, t_vals_fine], axis=-1), axis=-1)
+        t_vals_fine = self.hierarchical_sampling(t_vals_coarse_mid, weights_coarse, self.num_samples_fine)
+        t_vals_fine = tf.sort(tf.concat([t_vals_coarse, t_vals_fine], axis=-1), axis=-1) # why concat and sort?
 
         rays_fine = (rays_origins_coarse[..., None, :] + (rays_directions_coarse[..., None, :] * t_vals_fine[..., None]))
-        rays_fine = self.positional_encoding(rays_fine)
+        rays_fine = self.positional_encoding(rays_fine, POS_ENCODE_DIMS_RAYS)
 
         directions_fine_shape = tf.shape(rays_fine[..., :3])
         directions_fine = tf.broadcast_to(rays_directions_coarse[..., None, :], shape=directions_fine_shape)
-        directions_fine = self.positional_encoding(directions_fine)
+        directions_fine = self.positional_encoding(directions_fine, POS_ENCODE_DIMS_DIRS)
         
         with tf.GradientTape() as fine_tape:
             (rgb_fine, sigma_fine) = self.fine_model([rays_fine, directions_fine])
@@ -234,11 +232,13 @@ class NerfTrainer(keras.Model):
         self.optimizer_fine.apply_gradients(zip(gradients_fine, trainable_variables_fine))
 
         psnr = tf.image.psnr(images, images_fine, max_val=1.0)
+        ssim = tf.image.ssim(images, images_fine, max_val=1.0)
         
         self.loss_tracker.update_state(loss_fine)
         self.psnr_metric.update_state(psnr)
+        self.ssim_metric.update_state(ssim)
 
-        return {"loss": self.loss_tracker.result(), "psnr": self.psnr_metric.result()}
+        return {"loss": self.loss_tracker.result(), "psnr": self.psnr_metric.result(), "ssim": self.ssim_metric.result()}
 
     def test_step(self, inputs):
         # simplify this?
@@ -247,12 +247,12 @@ class NerfTrainer(keras.Model):
 
         # Equation: r(t) = o + td -> Building the "r" here.
         rays_coarse = rays_origins_coarse[..., None, :] + (rays_directions_coarse[..., None,:] * t_vals_coarse[..., None])
-        rays_coarse = self.positional_encoding(rays_coarse)
+        rays_coarse = self.positional_encoding(rays_coarse, POS_ENCODE_DIMS_RAYS)
 
         # same as flatten in keras?
         directions_coarse_shape = tf.shape(rays_coarse[..., :3])
         directions_coarse = tf.broadcast_to(rays_directions_coarse[..., None, :], shape=directions_coarse_shape)
-        directions_coarse = self.positional_encoding(directions_coarse)
+        directions_coarse = self.positional_encoding(directions_coarse, POS_ENCODE_DIMS_DIRS)
 
         (rgb_coarse, sigma_coarse) = self.coarse_model([rays_coarse, directions_coarse])
         render_coarse = self.render_image_depth(rgb_coarse, sigma_coarse, t_vals_coarse)
@@ -264,11 +264,11 @@ class NerfTrainer(keras.Model):
         t_vals_fine = tf.sort(tf.concat([t_vals_coarse, t_vals_fine], axis=-1), axis=-1)
 
         rays_fine = (rays_origins_coarse[..., None, :] + (rays_directions_coarse[..., None, :] * t_vals_fine[..., None]))
-        rays_fine = self.positional_encoding(rays_fine)
+        rays_fine = self.positional_encoding(rays_fine, POS_ENCODE_DIMS_RAYS)
 
         directions_fine_shape = tf.shape(rays_fine[..., :3])
         directions_fine = tf.broadcast_to(rays_directions_coarse[..., None, :], shape=directions_fine_shape)
-        directions_fine = self.positional_encoding(directions_fine)
+        directions_fine = self.positional_encoding(directions_fine, POS_ENCODE_DIMS_DIRS)
         
         (rgb_fine, sigma_fine) = self.fine_model([rays_fine, directions_fine])
         render_fine = self.render_image_depth(rgb_fine, sigma_fine, t_vals_fine)
@@ -277,11 +277,13 @@ class NerfTrainer(keras.Model):
         loss_fine = self.loss_fn(images, images_fine)
 
         psnr = tf.image.psnr(images, images_fine, max_val=1.0)
+        ssim = tf.image.ssim(images, images_fine, max_val=1.0)
         
         self.loss_tracker.update_state(loss_fine)
         self.psnr_metric.update_state(psnr)
+        self.ssim_metric.update_state(ssim)
 
-        return {"loss": self.loss_tracker.result(), "psnr": self.psnr_metric.result()}
+        return {"loss": self.loss_tracker.result(), "psnr": self.psnr_metric.result(), "ssim": self.ssim_metric.result()}
 
     @property
     def metrics(self):
@@ -294,11 +296,11 @@ def get_train_monitor(train_ds):
 	test_rays_coarse = (test_rays_origins_coarse[..., None, :] + 
 		(test_rays_directions_coarse[..., None, :] * test_t_vals_coarse[..., None]))
         
-	test_rays_coarse = positional_encoding(test_rays_coarse)
+	test_rays_coarse = positional_encoding(test_rays_coarse, POS_ENCODE_DIMS_RAYS)
 	test_dirs_coarse_shape = tf.shape(test_rays_coarse[..., :3])
 	test_dirs_coarse = tf.broadcast_to(test_rays_directions_coarse[..., None, :],
 		shape=test_dirs_coarse_shape)
-	test_dirs_coarse = positional_encoding(test_dirs_coarse)
+	test_dirs_coarse = positional_encoding(test_dirs_coarse, POS_ENCODE_DIMS_DIRS)
         
 	class TrainMonitor(keras.callbacks.Callback):
 		def on_epoch_end(self, epoch, logs=None):
@@ -319,12 +321,12 @@ def get_train_monitor(train_ds):
 			test_rays_fine = (test_rays_origins_coarse[..., None, :] + 
 				(test_rays_directions_coarse[..., None, :] * test_t_vals_fine[..., None])
 			)
-			test_rays_fine = self.model.positional_encoding(test_rays_fine)
+			test_rays_fine = self.model.positional_encoding(test_rays_fine, POS_ENCODE_DIMS_RAYS)
 			
 			test_dirs_fine_shape = tf.shape(test_rays_fine[..., :3])
 			test_dirs_fine = tf.broadcast_to(test_rays_directions_coarse[..., None, :],
 				shape=test_dirs_fine_shape)
-			test_dirs_fine = self.model.positional_encoding(test_dirs_fine)
+			test_dirs_fine = self.model.positional_encoding(test_dirs_fine, POS_ENCODE_DIMS_DIRS)
 			
 			test_rgb_fine, test_sigma_fine = self.model.fine_model.predict(
 				[test_rays_fine, test_dirs_fine])
@@ -401,7 +403,6 @@ val_ds = (
 
 print(train_ds.element_spec)
 print(val_ds.element_spec)
-# print(IMAGE_HEIGHT * IMAGE_WIDTH * NUM_SAMPLES)
 
 # instantiate the coarse model
 coarse_model = get_model(
@@ -409,7 +410,7 @@ coarse_model = get_model(
     dense_units=DENSE_UNITS,
 )
 
-coarse_model.build((None, None, None, 2 * 3 * POS_ENCODE_DIMS + 3, BATCH_SIZE))
+coarse_model.build((None, None, None, 2 * 3 * POS_ENCODE_DIMS_RAYS + 3, BATCH_SIZE))
 coarse_model.summary()
 
 # instantiate the fine model
@@ -437,6 +438,10 @@ nerf_trainer_model.compile(
 
 if not os.path.exists("./result"):
     os.makedirs("./result")
+
+with open("./result/model_summary.txt", "w") as f:
+    with redirect_stdout(f):
+        coarse_model.summary()
 
 if not os.path.exists("./result/images"):
     os.makedirs("./result/images")
