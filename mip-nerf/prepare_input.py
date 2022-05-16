@@ -6,8 +6,6 @@ from variables import *
 def expected_sin(x, x_var):
     """Estimates mean and variance of sin(z), z ~ N(x, var)."""
     # When the variance is wide, shrink sin towards zero.
-
-
     y = tf.exp(-0.5 * x_var) * tf.sin(x)
     y_var = tf.maximum(
         tf.cast(0, tf.float32), 0.5 * (1 - tf.exp(-2 * x_var) * tf.cos(2 * x)) - y**2)
@@ -156,14 +154,20 @@ def cast_cones(pose, lindisp=True, randomized=True, diag=True):
 
     (ray_origins, ray_directions) = get_rays(pose)
 
-    t_vals = tf.linspace(0., 1.,  NUM_SAMPLES + 1)
+    # t_vals = tf.linspace(0., 1.,  NUM_SAMPLES + 1)
 
-    if lindisp:
-        t_vals = 1. / (1. / NEAR * (1. - t_vals) + 1. / FAR * t_vals)
-    else:
-        t_vals = NEAR * (1. - t_vals) + FAR * t_vals
+    # if lindisp:
+    #     t_vals = 1. / (1. / NEAR * (1. - t_vals) + 1. / FAR * t_vals)
+    # else:
+    #     t_vals = NEAR * (1. - t_vals) + FAR * t_vals
     
-    t_vals = tf.broadcast_to(t_vals, [IMAGE_WIDTH, IMAGE_HEIGHT, NUM_SAMPLES + 1])
+    # t_vals = tf.broadcast_to(t_vals, [IMAGE_WIDTH, IMAGE_HEIGHT, NUM_SAMPLES + 1])
+
+    t_vals = tf.linspace(NEAR, FAR, NUM_SAMPLES)
+    # add randomness
+    shape = list(ray_origins.shape[:-1]) + [NUM_SAMPLES]
+    noise = tf.random.uniform(shape=shape) * (FAR - NEAR) / NUM_SAMPLES
+    t_vals = t_vals + noise
 
     t0 = t_vals[..., :-1]
     t1 = t_vals[..., 1:]
@@ -178,10 +182,10 @@ def cast_cones(pose, lindisp=True, randomized=True, diag=True):
     means, covs = gaussian_fn(ray_directions, t0, t1, RADIUS, diag)
     means = means + ray_origins[..., None, :]
 
-    # samples = integrated_pos_encoding((means, covs), 0, POS_ENCODE_DIMS)
-    # samples = tf.reshape(samples, [IMAGE_WIDTH, IMAGE_HEIGHT, NUM_SAMPLES + 1,-1])
+    samples = integrated_pos_encoding((means, covs), 0, POS_ENCODE_DIMS)
+    samples = tf.reshape(samples, [IMAGE_WIDTH, IMAGE_HEIGHT, NUM_SAMPLES, -1])
 
-    return (t_vals, (means, covs))
+    return (t_vals, samples)
 
 # t_vals is supposed to be a circle instead of a point...
 
