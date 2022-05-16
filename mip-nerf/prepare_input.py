@@ -113,6 +113,7 @@ def cylinder_to_gaussian(d, t0, t1, radius, diag):
     t_mean = (t0 + t1) / 2
     r_var = radius**2 / 4
     t_var = (t1 - t0)**2 / 12
+
     return lift_gaussian(d, t_mean, t_var, r_var, diag)
 
 def get_rays(pose):
@@ -154,22 +155,15 @@ def cast_cones(pose, lindisp=True, randomized=True, diag=True):
     """
 
     (ray_origins, ray_directions) = get_rays(pose)
-    
-    t_vals = tf.linspace(0., 1., NUM_SAMPLES + 1)
+
+    t_vals = tf.linspace(0., 1.,  NUM_SAMPLES + 1)
+
     if lindisp:
         t_vals = 1. / (1. / NEAR * (1. - t_vals) + 1. / FAR * t_vals)
     else:
         t_vals = NEAR * (1. - t_vals) + FAR * t_vals
-
-    # if randomized:
-    #     mids = 0.5 * (t_vals[..., 1:] + t_vals[..., :-1])
-    #     upper = tf.concat([mids, t_vals[..., -1:]], -1)
-    #     lower = tf.concat([t_vals[..., :1], mids], -1)
-    #     t_rand = tf.random.uniform([2,], [BATCH_SIZE, NUM_SAMPLES + 1])
-    #     t_vals = lower + (upper - lower) * t_rand
-    # else:
-    # Broadcast t_vals to make the returned shape consistent.
-    t_vals = tf.broadcast_to(t_vals, [BATCH_SIZE, NUM_SAMPLES + 1])
+    
+    t_vals = tf.broadcast_to(t_vals, [IMAGE_WIDTH, IMAGE_HEIGHT, NUM_SAMPLES + 1])
 
     t0 = t_vals[..., :-1]
     t1 = t_vals[..., 1:]
@@ -184,6 +178,13 @@ def cast_cones(pose, lindisp=True, randomized=True, diag=True):
     means, covs = gaussian_fn(ray_directions, t0, t1, RADIUS, diag)
     means = means + ray_origins[..., None, :]
 
-    samples = integrated_pos_encoding((means, covs), 0, POS_ENCODE_DIMS)
+    # samples = integrated_pos_encoding((means, covs), 0, POS_ENCODE_DIMS)
+    # samples = tf.reshape(samples, [IMAGE_WIDTH, IMAGE_HEIGHT, NUM_SAMPLES + 1,-1])
 
-    return (t_vals, samples)
+    return (t_vals, (means, covs))
+
+# t_vals is supposed to be a circle instead of a point...
+
+# samples...
+
+# shape incompatible
