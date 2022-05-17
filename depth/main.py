@@ -16,8 +16,6 @@ import cv2
 AUTO = tf.data.AUTOTUNE
 BATCH_SIZE = 1
 NUM_SAMPLES = 10
-# POS_ENCODE_DIMS_RAYS = 10
-# POS_ENCODE_DIMS_DIRS = 4
 POS_ENCODE_DIMS_RAYS = 16
 POS_ENCODE_DIMS_DIRS = 16
 EPOCHS = 50
@@ -26,6 +24,7 @@ NEAR = 2.0
 FAR = 6.0
 NUM_LAYERS = 8
 DENSE_UNITS = 64
+DEPTH_LOSS_BALANCER = 0.1
 
 print("BATCH_SIZE:", BATCH_SIZE)
 print("NUM_SAMPLES:", NUM_SAMPLES)
@@ -158,9 +157,6 @@ def get_model(num_layers=8, dense_units=64):
     return model
 
 def render_image_depth(rgb, sigma, t_vals):
-    print("rgb", rgb.shape)
-    print("sigma", sigma.shape)
-
     sigma = sigma[..., 0]
     delta = t_vals[..., 1:] - t_vals[..., :-1]
     delta_shape = [BATCH_SIZE, IMAGE_HEIGHT, IMAGE_WIDTH, 1]
@@ -226,7 +222,7 @@ class NerfTrainer(keras.Model):
             image_loss_coarse = self.loss_fn(images, images_coarse)
             depth_loss_coarse = self.loss_fn(depths, depths_coarse)
 
-            loss_coarse = image_loss_coarse + depth_loss_coarse
+            loss_coarse = image_loss_coarse + (DEPTH_LOSS_BALANCER * depth_loss_coarse)
 
         t_vals_coarse_mid = (0.5 * (t_vals_coarse[..., 1:] + t_vals_coarse[..., :-1]))
 
@@ -246,9 +242,10 @@ class NerfTrainer(keras.Model):
             (images_fine, depths_fine, weights_fine) = render_fine
 
             image_loss_fine = self.loss_fn(images, images_fine)
+            # loss_fine = image_loss_fine
             depth_loss_fine = self.loss_fn(depths, depths_fine)
 
-            loss_fine = image_loss_fine + depth_loss_fine
+            loss_fine = image_loss_fine + (DEPTH_LOSS_BALANCER * depth_loss_fine)
             
 
         trainable_variables_coarse = self.coarse_model.trainable_variables
@@ -305,7 +302,7 @@ class NerfTrainer(keras.Model):
         image_loss_fine = self.loss_fn(images, images_fine)
         depth_loss_fine = self.loss_fn(depths, depths_fine)
 
-        loss_fine = image_loss_fine + depth_loss_fine
+        loss_fine = image_loss_fine + (DEPTH_LOSS_BALANCER * depth_loss_fine)
 
         psnr = tf.image.psnr(images, images_fine, max_val=1.0)
         ssim = tf.image.ssim(images, images_fine, max_val=1.0)
