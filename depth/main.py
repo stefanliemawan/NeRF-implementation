@@ -9,6 +9,7 @@ from tqdm import tqdm
 import glob
 from contextlib import redirect_stdout
 from PIL import Image
+import io
 import cv2
 
 # Initialize global variables.
@@ -40,11 +41,28 @@ if not os.path.exists(file_name):
 
 data = np.load(data)
 images = data["images"]
-im_shape = images.shape
 (num_images, IMAGE_HEIGHT, IMAGE_WIDTH, _) = images.shape
 (poses, focal) = (data["poses"], data["focal"])
 
-split_index = int(num_images * 0.8)
+split_index = int(num_images * 0.9)
+
+depths = []
+
+for depth_file in os.listdir("../datasets/tiny_nerf/depths"):
+    image = Image.open(f"../datasets/tiny_nerf/depths/{depth_file}")
+    depths.append(np.asarray(image))
+
+depths = np.asarray(depths)
+depths = depths[:, :, :, 0]
+
+# not sure if this is correct for depths
+
+
+# for i in range(len(images)):
+#     image = images[i]
+#     plt.imshow(image, interpolation="nearest")
+#     plt.axis("off")
+#     plt.savefig(f"../datasets/tiny_nerf/images/{i}.png", bbox_inches="tight", pad_inches=0, dpi=27.2)
 
 def get_rays(pose):
     x, y = tf.meshgrid(
@@ -139,32 +157,34 @@ def get_model(num_layers=8, dense_units=64):
 
     return model
 
-
 def render_image_depth(rgb, sigma, t_vals):
-	sigma = sigma[..., 0]
-	delta = t_vals[..., 1:] - t_vals[..., :-1]
-	delta_shape = [BATCH_SIZE, IMAGE_HEIGHT, IMAGE_WIDTH, 1]
-	delta = tf.concat(
+    print("rgb", rgb.shape)
+    print("sigma", sigma.shape)
+
+    sigma = sigma[..., 0]
+    delta = t_vals[..., 1:] - t_vals[..., :-1]
+    delta_shape = [BATCH_SIZE, IMAGE_HEIGHT, IMAGE_WIDTH, 1]
+    delta = tf.concat(
 		[delta, tf.broadcast_to([1e10], shape=delta_shape)], axis=-1)
 
 	# calculate alpha from sigma and delta values
-	alpha = 1.0 - tf.exp(-sigma * delta)
+    alpha = 1.0 - tf.exp(-sigma * delta)
 
 	# calculate the exponential term for easier calculations
-	exp_term = 1.0 - alpha
-	epsilon = 1e-10
+    exp_term = 1.0 - alpha
+    epsilon = 1e-10
 
 	# calculate the transmittance and weights of the ray points
-	transmittance = tf.math.cumprod(exp_term + epsilon, axis=-1,
+    transmittance = tf.math.cumprod(exp_term + epsilon, axis=-1,
 		exclusive=True)
-	weights = alpha * transmittance
+    weights = alpha * transmittance
 	
 	# build the image and depth map from the points of the rays
-	image = tf.reduce_sum(weights[..., None] * rgb, axis=-2)
-	depth = tf.reduce_sum(weights * t_vals, axis=-1)
+    image = tf.reduce_sum(weights[..., None] * rgb, axis=-2)
+    depth = tf.reduce_sum(weights * t_vals, axis=-1)
 	
 	# return rgb, depth map and weights
-	return (image, depth, weights)
+    return (image, depth, weights)
 
 class NerfTrainer(keras.Model):
     def __init__(self, coarse_model, fine_model, num_samples_fine):
@@ -186,7 +206,7 @@ class NerfTrainer(keras.Model):
 
     def train_step(self, inputs):
         # simplify this?
-        (images, rays) = inputs
+        (images, depths, rays) = inputs
         (rays_origins_coarse, rays_directions_coarse, t_vals_coarse) = rays
 
         # Equation: r(t) = o + td -> Building the "r" here.
@@ -201,10 +221,12 @@ class NerfTrainer(keras.Model):
         with tf.GradientTape() as coarse_tape:
             (rgb_coarse, sigma_coarse) = self.coarse_model([rays_coarse, directions_coarse])
             render_coarse = render_image_depth(rgb_coarse, sigma_coarse, t_vals_coarse)
-            (images_coarse, depth_coarse, weights_coarse) = render_coarse
-
+            (images_coarse, depths_coarse, weights_coarse) = render_coarse
+        
             image_loss_coarse = self.loss_fn(images, images_coarse)
-            loss_coarse = image_loss_coarse
+            depth_loss_coarse = self.loss_fn(depths, depths_coarse)
+
+            loss_coarse = image_loss_coarse + depth_loss_coarse
 
         t_vals_coarse_mid = (0.5 * (t_vals_coarse[..., 1:] + t_vals_coarse[..., :-1]))
 
@@ -221,14 +243,13 @@ class NerfTrainer(keras.Model):
         with tf.GradientTape() as fine_tape:
             (rgb_fine, sigma_fine) = self.fine_model([rays_fine, directions_fine])
             render_fine = render_image_depth(rgb_fine, sigma_fine, t_vals_fine)
-            (images_fine, depth_fine, weights_fine) = render_fine
+            (images_fine, depths_fine, weights_fine) = render_fine
 
             image_loss_fine = self.loss_fn(images, images_fine)
+            depth_loss_fine = self.loss_fn(depths, depths_fine)
 
-            loss_fine = image_loss_fine
-            # depth_loss_fine = self.loss_fn(depth_coarse, depth_fine)
+            loss_fine = image_loss_fine + depth_loss_fine
             
-            # loss_fine = tf.math.reduce_mean(tf.cast(image_loss_fine, tf.int32), tf.cast(depth_loss_fine, tf.int32))
 
         trainable_variables_coarse = self.coarse_model.trainable_variables
         gradients_coarse = coarse_tape.gradient(loss_coarse, trainable_variables_coarse)
@@ -249,7 +270,7 @@ class NerfTrainer(keras.Model):
 
     def test_step(self, inputs):
         # simplify this?
-        (images, rays) = inputs
+        (images, depths, rays) = inputs
         (rays_origins_coarse, rays_directions_coarse, t_vals_coarse) = rays
 
         # Equation: r(t) = o + td -> Building the "r" here.
@@ -279,9 +300,12 @@ class NerfTrainer(keras.Model):
         
         (rgb_fine, sigma_fine) = self.fine_model([rays_fine, directions_fine])
         render_fine = render_image_depth(rgb_fine, sigma_fine, t_vals_fine)
-        (images_fine, _, _) = render_fine
+        (images_fine, depths_fine , _) = render_fine
 
-        loss_fine = self.loss_fn(images, images_fine)
+        image_loss_fine = self.loss_fn(images, images_fine)
+        depth_loss_fine = self.loss_fn(depths, depths_fine)
+
+        loss_fine = image_loss_fine + depth_loss_fine
 
         psnr = tf.image.psnr(images, images_fine, max_val=1.0)
         ssim = tf.image.ssim(images, images_fine, max_val=1.0)
@@ -299,7 +323,7 @@ class NerfTrainer(keras.Model):
 def get_train_monitor(train_ds):
     loss_list = []
 
-    (test_images, test_rays) = next(iter(train_ds))
+    (test_images, test_depths, test_rays) = next(iter(train_ds))
     (test_rays_origins_coarse, test_rays_directions_coarse, test_t_vals_coarse) = test_rays
 
     test_rays_coarse = (test_rays_origins_coarse[..., None, :] + 
@@ -343,20 +367,30 @@ def get_train_monitor(train_ds):
             	[test_rays_fine, test_dirs_fine])
 
             test_render_fine = render_image_depth(test_rgb_fine, test_sigma_fine, test_t_vals_fine)
-            (test_image_fine, test_depth_fine, _) = test_render_fine            
-            (_, ax) = plt.subplots(nrows=1, ncols=4, figsize=(10, 10))
+            (test_image_fine, test_depth_fine, _) = test_render_fine
+
+            (_, ax) = plt.subplots(nrows=1, ncols=6, figsize=(20, 5))
+
             ax[0].imshow(keras.preprocessing.image.array_to_img(test_image_coarse[0]))
-            ax[0].set_title(f"Coarse Image")            
+            ax[0].set_title(f"Coarse Image")
+            
             ax[1].imshow(keras.preprocessing.image.array_to_img(test_image_fine[0]))
-            ax[1].set_title(f"Fine Image")          
-            ax[2].imshow(keras.preprocessing.image.array_to_img(test_depth_fine[0, ..., None]), 
+            ax[1].set_title(f"Fine Image")
+            
+            ax[2].imshow(keras.preprocessing.image.array_to_img(test_images[0]))
+            ax[2].set_title(f"Real Image")
+
+            ax[3].imshow(keras.preprocessing.image.array_to_img(test_depth_fine[0, ..., None]), 
             	cmap="inferno")
-            ax[2].set_title(f"Fine Depth Image")            
-            ax[3].imshow(keras.preprocessing.image.array_to_img(test_images[0]))
-            ax[3].set_title(f"Real Image")          
-            ax[4].plot(loss_list)
-            ax[4].set_xticks(np.arange(0, EPOCHS + 1, 5.0))
-            ax[4].set_title(f"Loss Plot: {epoch:03d}")
+            ax[3].set_title(f"Fine Depth Image")
+
+            ax[4].imshow(keras.preprocessing.image.array_to_img(test_depths[0, ..., None]), 
+            	cmap="inferno")
+            ax[4].set_title(f"Real Depth Image")
+
+            ax[5].plot(loss_list)
+            ax[5].set_xticks(np.arange(0, EPOCHS + 1, 5.0))
+            ax[5].set_title(f"Loss Plot: {epoch:03d}")
 
             plt.savefig(f"./result/images/{epoch:03d}.png")
             plt.close()
@@ -367,11 +401,11 @@ def get_train_monitor(train_ds):
     return trainMonitor
 
 def create_gif(path_to_images, name_gif):
-    filenames = glob.glob(path_to_images)
-    filenames = sorted(filenames)
+    depth_filenames = glob.glob(path_to_images)
+    depth_filenames = sorted(depth_filenames)
     images = []
-    for filename in tqdm(filenames):
-        images.append(imageio.imread(filename))
+    for depth_filename in tqdm(depth_filenames):
+        images.append(imageio.imread(depth_filename))
     kargs = {"duration": 0.25}
     imageio.mimsave(name_gif, images, "GIF", **kargs)
 
@@ -379,6 +413,10 @@ def create_gif(path_to_images, name_gif):
 # Split the images into training and validation.
 train_images = images[:split_index]
 val_images = images[split_index:]
+
+train_depths = depths[:split_index]
+val_depths = depths[split_index:]
+
 
 # Split the poses into training and validation.
 train_poses = poses[:split_index]
@@ -393,9 +431,10 @@ print(val_poses.shape)
 
 # Make the training pipeline.
 train_img_ds = tf.data.Dataset.from_tensor_slices(train_images)
+train_depth_ds = tf.data.Dataset.from_tensor_slices(train_depths)
 train_pose_ds = tf.data.Dataset.from_tensor_slices(train_poses)
 train_ray_ds = train_pose_ds.map(get_rays, num_parallel_calls=AUTO)
-training_ds = tf.data.Dataset.zip((train_img_ds, train_ray_ds))
+training_ds = tf.data.Dataset.zip((train_img_ds, train_depth_ds ,train_ray_ds))
 train_ds = (
     training_ds.shuffle(BATCH_SIZE)
     .batch(BATCH_SIZE, drop_remainder=True, num_parallel_calls=AUTO)
@@ -404,9 +443,10 @@ train_ds = (
 
 # Make the validation pipeline.
 val_img_ds = tf.data.Dataset.from_tensor_slices(val_images)
+val_depth_ds = tf.data.Dataset.from_tensor_slices(val_depths)
 val_pose_ds = tf.data.Dataset.from_tensor_slices(val_poses)
 val_ray_ds = val_pose_ds.map(get_rays, num_parallel_calls=AUTO)
-validation_ds = tf.data.Dataset.zip((val_img_ds, val_ray_ds))
+validation_ds = tf.data.Dataset.zip((val_img_ds, val_depth_ds, val_ray_ds))
 val_ds = (
     validation_ds.shuffle(BATCH_SIZE)
     .batch(BATCH_SIZE, drop_remainder=True, num_parallel_calls=AUTO)
@@ -415,6 +455,10 @@ val_ds = (
 
 print(train_ds.element_spec)
 print(val_ds.element_spec)
+
+
+# (ray_origins, ray_directions, t_vals) = get_rays(poses[0])
+# (image, depth, weights) = render_image_depth(rgb, sigma, t_vals)
 
 # instantiate the coarse model
 coarse_model = get_model(

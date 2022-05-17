@@ -44,7 +44,7 @@ im_shape = images.shape
 (num_images, IMAGE_HEIGHT, IMAGE_WIDTH, _) = images.shape
 (poses, focal) = (data["poses"], data["focal"])
 
-split_index = int(num_images * 0.8)
+split_index = int(num_images * 0.9)
 
 def get_rays(pose):
     x, y = tf.meshgrid(
@@ -344,7 +344,7 @@ def get_train_monitor(train_ds):
 
             test_render_fine = render_image_depth(test_rgb_fine, test_sigma_fine, test_t_vals_fine)
             (test_image_fine, test_depth_fine, _) = test_render_fine            
-            (_, ax) = plt.subplots(nrows=1, ncols=4, figsize=(10, 10))
+            (_, ax) = plt.subplots(nrows=1, ncols=5, figsize=(20, 5))
             ax[0].imshow(keras.preprocessing.image.array_to_img(test_image_coarse[0]))
             ax[0].set_title(f"Coarse Image")            
             ax[1].imshow(keras.preprocessing.image.array_to_img(test_image_fine[0]))
