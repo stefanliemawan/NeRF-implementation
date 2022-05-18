@@ -45,23 +45,19 @@ images = data["images"]
 
 split_index = int(num_images * 0.9)
 
-depths = []
+depths = images[:,:,:,0]
+print(depths.shape)
 
-for depth_file in os.listdir("../datasets/tiny_nerf/depths"):
-    image = Image.open(f"../datasets/tiny_nerf/depths/{depth_file}")
-    depths.append(np.asarray(image))
+# depths = []
 
-depths = np.asarray(depths)
-depths = depths[:, :, :, 0]
+# for depth_file in os.listdir("../datasets/tiny_nerf/depths"):
+#     image = Image.open(f"../datasets/tiny_nerf/depths/{depth_file}")
+#     depths.append(np.asarray(image))
+
+# depths = np.asarray(depths)
+# depths = depths[:, :, :, 0]
 
 # not sure if this is correct for depths
-
-
-# for i in range(len(images)):
-#     image = images[i]
-#     plt.imshow(image, interpolation="nearest")
-#     plt.axis("off")
-#     plt.savefig(f"../datasets/tiny_nerf/images/{i}.png", bbox_inches="tight", pad_inches=0, dpi=27.2)
 
 def get_rays(pose):
     x, y = tf.meshgrid(
@@ -222,7 +218,8 @@ class NerfTrainer(keras.Model):
             image_loss_coarse = self.loss_fn(images, images_coarse)
             depth_loss_coarse = self.loss_fn(depths, depths_coarse)
 
-            loss_coarse = image_loss_coarse + (DEPTH_LOSS_BALANCER * depth_loss_coarse)
+            loss_coarse = image_loss_coarse + depth_loss_coarse
+            # loss_coarse = image_loss_coarse + (DEPTH_LOSS_BALANCER * depth_loss_coarse)
 
         t_vals_coarse_mid = (0.5 * (t_vals_coarse[..., 1:] + t_vals_coarse[..., :-1]))
 
@@ -242,10 +239,9 @@ class NerfTrainer(keras.Model):
             (images_fine, depths_fine, weights_fine) = render_fine
 
             image_loss_fine = self.loss_fn(images, images_fine)
-            # loss_fine = image_loss_fine
             depth_loss_fine = self.loss_fn(depths, depths_fine)
 
-            loss_fine = image_loss_fine + (DEPTH_LOSS_BALANCER * depth_loss_fine)
+            loss_fine = image_loss_fine + depth_loss_fine
             
 
         trainable_variables_coarse = self.coarse_model.trainable_variables
@@ -302,7 +298,7 @@ class NerfTrainer(keras.Model):
         image_loss_fine = self.loss_fn(images, images_fine)
         depth_loss_fine = self.loss_fn(depths, depths_fine)
 
-        loss_fine = image_loss_fine + (DEPTH_LOSS_BALANCER * depth_loss_fine)
+        loss_fine = image_loss_fine +  depth_loss_fine
 
         psnr = tf.image.psnr(images, images_fine, max_val=1.0)
         ssim = tf.image.ssim(images, images_fine, max_val=1.0)
@@ -406,105 +402,107 @@ def create_gif(path_to_images, name_gif):
     kargs = {"duration": 0.25}
     imageio.mimsave(name_gif, images, "GIF", **kargs)
 
+def train():
+    # Split the images into training and validation.
+    train_images = images[:split_index]
+    val_images = images[split_index:]
 
-# Split the images into training and validation.
-train_images = images[:split_index]
-val_images = images[split_index:]
-
-train_depths = depths[:split_index]
-val_depths = depths[split_index:]
-
-
-# Split the poses into training and validation.
-train_poses = poses[:split_index]
-val_poses = poses[split_index:]
-
-print(train_images.shape)
-print(val_images.shape)
-
-print(train_poses.shape)
-print(val_poses.shape)
+    train_depths = depths[:split_index]
+    val_depths = depths[split_index:]
 
 
-# Make the training pipeline.
-train_img_ds = tf.data.Dataset.from_tensor_slices(train_images)
-train_depth_ds = tf.data.Dataset.from_tensor_slices(train_depths)
-train_pose_ds = tf.data.Dataset.from_tensor_slices(train_poses)
-train_ray_ds = train_pose_ds.map(get_rays, num_parallel_calls=AUTO)
-training_ds = tf.data.Dataset.zip((train_img_ds, train_depth_ds ,train_ray_ds))
-train_ds = (
-    training_ds.shuffle(BATCH_SIZE)
-    .batch(BATCH_SIZE, drop_remainder=True, num_parallel_calls=AUTO)
-    .prefetch(AUTO)
-)
+    # Split the poses into training and validation.
+    train_poses = poses[:split_index]
+    val_poses = poses[split_index:]
 
-# Make the validation pipeline.
-val_img_ds = tf.data.Dataset.from_tensor_slices(val_images)
-val_depth_ds = tf.data.Dataset.from_tensor_slices(val_depths)
-val_pose_ds = tf.data.Dataset.from_tensor_slices(val_poses)
-val_ray_ds = val_pose_ds.map(get_rays, num_parallel_calls=AUTO)
-validation_ds = tf.data.Dataset.zip((val_img_ds, val_depth_ds, val_ray_ds))
-val_ds = (
-    validation_ds.shuffle(BATCH_SIZE)
-    .batch(BATCH_SIZE, drop_remainder=True, num_parallel_calls=AUTO)
-    .prefetch(AUTO)
-)
+    print(train_images.shape)
+    print(val_images.shape)
 
-print(train_ds.element_spec)
-print(val_ds.element_spec)
+    print(train_poses.shape)
+    print(val_poses.shape)
 
 
-# (ray_origins, ray_directions, t_vals) = get_rays(poses[0])
-# (image, depth, weights) = render_image_depth(rgb, sigma, t_vals)
+    # Make the training pipeline.
+    train_img_ds = tf.data.Dataset.from_tensor_slices(train_images)
+    train_depth_ds = tf.data.Dataset.from_tensor_slices(train_depths)
+    train_pose_ds = tf.data.Dataset.from_tensor_slices(train_poses)
+    train_ray_ds = train_pose_ds.map(get_rays, num_parallel_calls=AUTO)
+    training_ds = tf.data.Dataset.zip((train_img_ds, train_depth_ds ,train_ray_ds))
+    train_ds = (
+        training_ds.shuffle(BATCH_SIZE)
+        .batch(BATCH_SIZE, drop_remainder=True, num_parallel_calls=AUTO)
+        .prefetch(AUTO)
+    )
 
-# instantiate the coarse model
-coarse_model = get_model(
-	num_layers=NUM_LAYERS,
-    dense_units=DENSE_UNITS,
-)
+    # Make the validation pipeline.
+    val_img_ds = tf.data.Dataset.from_tensor_slices(val_images)
+    val_depth_ds = tf.data.Dataset.from_tensor_slices(val_depths)
+    val_pose_ds = tf.data.Dataset.from_tensor_slices(val_poses)
+    val_ray_ds = val_pose_ds.map(get_rays, num_parallel_calls=AUTO)
+    validation_ds = tf.data.Dataset.zip((val_img_ds, val_depth_ds, val_ray_ds))
+    val_ds = (
+        validation_ds.shuffle(BATCH_SIZE)
+        .batch(BATCH_SIZE, drop_remainder=True, num_parallel_calls=AUTO)
+        .prefetch(AUTO)
+    )
 
-coarse_model.build((None, None, None, 2 * 3 * POS_ENCODE_DIMS_RAYS + 3, BATCH_SIZE))
-coarse_model.summary()
+    print(train_ds.element_spec)
+    print(val_ds.element_spec)
 
-# instantiate the fine model
-fine_model = get_model(
-	num_layers=NUM_LAYERS,
-    dense_units=DENSE_UNITS,
-)
 
-# instantiate the nerf trainer model
-nerf_trainer_model = NerfTrainer(
-    coarse_model=coarse_model, 
-    fine_model=fine_model,
-    num_samples_fine=NUM_SAMPLES
-)
+    # (ray_origins, ray_directions, t_vals) = get_rays(poses[0])
+    # (image, depth, weights) = render_image_depth(rgb, sigma, t_vals)
 
-# compile the nerf trainer model with Adam optimizer and MSE loss
-nerf_trainer_model.compile(
-    optimizer_coarse=keras.optimizers.Adam(),
-    optimizer_fine=keras.optimizers.Adam(),
-	loss_fn=keras.losses.MeanSquaredLogarithmicError ()
-)
+    # instantiate the coarse model
+    coarse_model = get_model(
+        num_layers=NUM_LAYERS,
+        dense_units=DENSE_UNITS,
+    )
 
-if not os.path.exists("./result"):
-    os.makedirs("./result")
+    coarse_model.build((None, None, None, 2 * 3 * POS_ENCODE_DIMS_RAYS + 3, BATCH_SIZE))
+    coarse_model.summary()
 
-with open("./result/model_summary.txt", "w") as f:
-    with redirect_stdout(f):
-        coarse_model.summary()
+    # instantiate the fine model
+    fine_model = get_model(
+        num_layers=NUM_LAYERS,
+        dense_units=DENSE_UNITS,
+    )
 
-if not os.path.exists("./result/images"):
-    os.makedirs("./result/images")
+    # instantiate the nerf trainer model
+    nerf_trainer_model = NerfTrainer(
+        coarse_model=coarse_model, 
+        fine_model=fine_model,
+        num_samples_fine=NUM_SAMPLES
+    )
 
-train_monitor = get_train_monitor(train_ds)
+    # compile the nerf trainer model with Adam optimizer and MSE loss
+    nerf_trainer_model.compile(
+        optimizer_coarse=keras.optimizers.Adam(),
+        optimizer_fine=keras.optimizers.Adam(),
+        loss_fn=keras.losses.MeanSquaredLogarithmicError ()
+    )
 
-nerf_trainer_model.fit(
-    train_ds,
-    validation_data=val_ds,
-    batch_size=BATCH_SIZE,
-    epochs=EPOCHS,
-    callbacks=[train_monitor],
-    steps_per_epoch=split_index//BATCH_SIZE,
-)
+    if not os.path.exists("./result"):
+        os.makedirs("./result")
 
-create_gif("./result/images/*.png", "./result/training.gif")
+    with open("./result/model_summary.txt", "w") as f:
+        with redirect_stdout(f):
+            coarse_model.summary()
+
+    if not os.path.exists("./result/images"):
+        os.makedirs("./result/images")
+
+    train_monitor = get_train_monitor(train_ds)
+
+    nerf_trainer_model.fit(
+        train_ds,
+        validation_data=val_ds,
+        batch_size=BATCH_SIZE,
+        epochs=EPOCHS,
+        callbacks=[train_monitor],
+        steps_per_epoch=split_index//BATCH_SIZE,
+    )
+
+    create_gif("./result/images/*.png", "./result/training.gif")
+
+train()
