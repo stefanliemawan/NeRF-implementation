@@ -142,9 +142,6 @@ def get_model(num_layers=8, dense_units=64):
 
 
 def render_image_depth(rgb, sigma, t_vals):
-
-	print(sigma)
-
 	sigma = sigma[..., 0]
 	delta = t_vals[..., 1:] - t_vals[..., :-1]
 	delta_shape = [BATCH_SIZE, IMAGE_HEIGHT, IMAGE_WIDTH, 1]
@@ -153,9 +150,6 @@ def render_image_depth(rgb, sigma, t_vals):
 
 	# calculate alpha from sigma and delta values
 	alpha = 1.0 - tf.exp(-sigma * delta)
-
-	print(delta)
-	print(alpha)
 
 	# calculate the exponential term for easier calculations
 	exp_term = 1.0 - alpha
@@ -216,7 +210,7 @@ class NerfTrainer(keras.Model):
 		t_vals_coarse_mid = (0.5 * (t_vals_coarse[..., 1:] + t_vals_coarse[..., :-1]))
 
 		t_vals_fine = hierarchical_sampling(t_vals_coarse_mid, weights_coarse, self.num_samples_fine)
-		t_vals_fine = tf.sort(tf.concat([t_vals_coarse, t_vals_fine], axis=-1), axis=-1) # why concat and sort?
+		t_vals_fine = tf.sort(tf.concat([t_vals_coarse, t_vals_fine], axis=-1), axis=-1) # why concat and sort? double the num_samples
 
 		rays_fine = (rays_origins_coarse[..., None, :] + (rays_directions_coarse[..., None, :] * t_vals_fine[..., None]))
 		rays_fine = positional_encoding(rays_fine, POS_ENCODE_DIMS_RAYS)
@@ -379,6 +373,79 @@ def create_gif(path_to_images, name_gif):
 	kargs = {"duration": 0.25}
 	imageio.mimsave(name_gif, images, "GIF", **kargs)
 
+def train_no_validation():
+	train_images = images
+	train_poses = poses
+
+	print(train_images.shape)
+	print(train_poses.shape)
+
+
+	# Make the training pipeline.
+	train_img_ds = tf.data.Dataset.from_tensor_slices(train_images)
+	train_pose_ds = tf.data.Dataset.from_tensor_slices(train_poses)
+	train_ray_ds = train_pose_ds.map(get_rays, num_parallel_calls=AUTO)
+	training_ds = tf.data.Dataset.zip((train_img_ds, train_ray_ds))
+	train_ds = (
+		training_ds.shuffle(BATCH_SIZE)
+		.batch(BATCH_SIZE, drop_remainder=True, num_parallel_calls=AUTO)
+		.prefetch(AUTO)
+	)
+
+	print(train_ds.element_spec)
+
+	# instantiate the coarse model
+	coarse_model = get_model(
+		num_layers=NUM_LAYERS,
+		dense_units=DENSE_UNITS,
+	)
+
+	coarse_model.build((None, None, None, 2 * 3 * POS_ENCODE_DIMS_RAYS + 3, BATCH_SIZE))
+	coarse_model.summary()
+
+	# instantiate the fine model
+	fine_model = get_model(
+		num_layers=NUM_LAYERS,
+		dense_units=DENSE_UNITS,
+	)
+
+	# instantiate the nerf trainer model
+	nerf_trainer_model = NerfTrainer(
+		coarse_model=coarse_model, 
+		fine_model=fine_model,
+		num_samples_fine=NUM_SAMPLES
+	)
+
+	# compile the nerf trainer model with Adam optimizer and MSE loss
+	nerf_trainer_model.compile(
+		optimizer_coarse=keras.optimizers.Adam(),
+		optimizer_fine=keras.optimizers.Adam(),
+		loss_fn=keras.losses.MeanSquaredLogarithmicError ()
+	)
+
+	if not os.path.exists("./result"):
+		os.makedirs("./result")
+
+	with open("./result/model_summary.txt", "w") as f:
+		with redirect_stdout(f):
+			coarse_model.summary()
+
+	if not os.path.exists("./result/images"):
+		os.makedirs("./result/images")
+
+	train_monitor = get_train_monitor(train_ds)
+
+	nerf_trainer_model.fit(
+		train_ds,
+		batch_size=BATCH_SIZE,
+		epochs=EPOCHS,
+		callbacks=[train_monitor],
+		steps_per_epoch=len(train_images)//BATCH_SIZE,
+	)
+
+	create_gif("./result/images/*.png", "./result/training.gif")
+
+
 def train():
 	# Split the images into training and validation.
 	train_images = images[:split_index]
@@ -472,4 +539,5 @@ def train():
 
 	create_gif("./result/images/*.png", "./result/training.gif")
 
-train()
+# train()
+train_no_validation()
